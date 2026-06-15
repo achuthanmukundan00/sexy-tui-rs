@@ -1,22 +1,25 @@
-# @earendil-works/pi-tui
+# sexy-tui-rs
 
-Minimal terminal UI framework with differential rendering and synchronized output for flicker-free interactive CLI applications.
+Minimal terminal UI framework with differential rendering, synchronized output, and an enhanced 3-layer theming engine. Rust port of [@earendil-works/pi-tui](https://github.com/earendil-works/pi-mono/tree/main/packages/tui) with progressive terminal capability enhancement.
 
 ## Features
 
 - **Differential Rendering**: Three-strategy rendering system that only updates what changed
 - **Synchronized Output**: Uses CSI 2026 for atomic screen updates (no flicker)
 - **Bracketed Paste Mode**: Handles large pastes correctly with markers for >10 line pastes
-- **Component-based**: Simple Component interface with render() method
-- **Theme Support**: Components accept theme interfaces for customizable styling
+- **Component-based**: Simple Component trait with render(), handle_input(), invalidate()
+- **3-Layer Theme Engine**: Built-in defaults → TOML config → runtime agent overrides, with 5 progressive enhancement tiers
+- **Nerd Font Ready**: Icon tokens with automatic ASCII fallbacks for bare terminals
+- **Cross-Platform**: crossterm powers Windows, macOS, and Linux from a single codebase
 - **Built-in Components**: Text, TruncatedText, Input, Editor, Markdown, Loader, SelectList, SettingsList, Spacer, Image, Box, Container
 - **Inline Images**: Renders images in terminals that support Kitty or iTerm2 graphics protocols
 - **Autocomplete Support**: File paths and slash commands
+- **Zero Dependencies on TUI Frameworks**: No Ratatui, no tui-rs — direct crossterm control
 
 ## Quick Start
 
-```typescript
-import { TUI, Text, Editor, ProcessTerminal, matchesKey } from "@earendil-works/pi-tui";
+```rust
+use sexy_tui_rs::{TUI, Text, Editor, ProcessTerminal, matches_key, Key};
 
 // Create terminal
 const terminal = new ProcessTerminal();

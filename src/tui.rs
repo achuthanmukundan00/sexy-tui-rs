@@ -1,5 +1,5 @@
 /// Core TUI implementation with differential rendering.
-/// Port of src/tui.ts (1641 lines).
+/// Port of @earendil-works/pi-tui src/tui.ts (1641 lines).
 
 use std::cell::RefCell;
 use std::rc::Rc;

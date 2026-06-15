@@ -1,6 +1,30 @@
 # Changelog
 
-## [Unreleased]
+> **sexy-tui-rs** is a Rust port of [@earendil-works/pi-tui](https://github.com/earendil-works/pi-mono/tree/main/packages/tui).
+> Changes below the fork line are from the upstream pi-tui changelog.
+
+---
+
+## [0.1.0] - 2026-06-14 (Fork)
+
+### Added
+
+- Complete Rust port of pi-tui (~12K TS → 4.6K Rust)
+- 3-layer theme engine with TOML config and agent runtime overrides
+- 5 progressive enhancement tiers (baseline ANSI → GPU terminal)
+- Nerd Font icon tokens with automatic ASCII fallbacks
+- crossterm-based cross-platform terminal I/O (Windows, macOS, Linux)
+- 31 unit tests, zero compiler warnings
+
+### Changed
+
+- Component interface: TypeScript interfaces → Rust traits with default method bodies
+- Theme system: `(str) => str` color functions → 3-layer resolution (defaults → TOML → overrides)
+- Terminal: Node.js ProcessTerminal → crossterm-based CrosstermTerminal
+
+---
+
+## [Unreleased] (Upstream)
 
 ### Added
 

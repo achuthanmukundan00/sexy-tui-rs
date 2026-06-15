@@ -2,6 +2,8 @@
 //!
 //! A minimal terminal UI framework with differential rendering,
 //! synchronized output, and an enhanced declarative theming system.
+//!
+//! Forked and ported to Rust by @achuthanmukundan00.
 
 pub mod autocomplete;
 pub mod editor_component;
