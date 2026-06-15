@@ -1,0 +1,61 @@
+//! sexy-tui-rs — Rust port of @earendil-works/pi-tui
+//!
+//! A minimal terminal UI framework with differential rendering,
+//! synchronized output, and an enhanced declarative theming system.
+
+pub mod autocomplete;
+pub mod editor_component;
+pub mod fuzzy;
+pub mod keybindings;
+pub mod keys;
+pub mod kill_ring;
+pub mod native_modifiers;
+pub mod stdin_buffer;
+pub mod terminal;
+pub mod terminal_colors;
+pub mod terminal_image;
+pub mod theme;
+pub mod tui;
+pub mod undo_stack;
+pub mod utils;
+pub mod widgets;
+pub mod word_navigation;
+
+// Re-exports matching the TS src/index.ts public API
+pub use autocomplete::{
+    AutocompleteItem, AutocompleteProvider, AutocompleteSuggestions,
+    CombinedAutocompleteProvider, SlashCommand,
+};
+pub use editor_component::EditorComponent;
+pub use fuzzy::{fuzzy_filter, fuzzy_match, FuzzyMatch};
+pub use keybindings::{
+    get_keybindings, set_keybindings, Keybinding, KeybindingConflict,
+    KeybindingDefinition, KeybindingDefinitions, Keybindings, KeybindingsConfig,
+    KeybindingsManager, TUI_KEYBINDINGS,
+};
+pub use keys::{
+    decode_kitty_printable, is_key_release, is_key_repeat, is_kitty_protocol_active,
+    matches_key, parse_key, set_kitty_protocol_active, Key, KeyEventType,
+};
+pub use stdin_buffer::{StdinBuffer, StdinBufferOptions};
+pub use terminal::{ProcessTerminal, Terminal};
+pub use terminal_colors::{parse_osc11_background_color, RgbColor};
+pub use terminal_image::{
+    allocate_image_id, calculate_image_rows, delete_all_kitty_images, delete_kitty_image,
+    detect_capabilities, encode_iterm2, encode_kitty, get_capabilities, get_cell_dimensions,
+    get_gif_dimensions, get_image_dimensions, get_jpeg_dimensions, get_png_dimensions,
+    get_webp_dimensions, hyperlink, image_fallback, is_image_line, render_image,
+    reset_capabilities_cache, set_capabilities, set_cell_dimensions, CellDimensions,
+    ImageDimensions, ImageProtocol, ImageRenderOptions, TerminalCapabilities,
+};
+pub use tui::{
+    is_focusable, Component, Container, CURSOR_MARKER, Focusable, OverlayAnchor, OverlayHandle,
+    OverlayMargin, OverlayOptions, OverlayUnfocusOptions, TUI,
+};
+pub use utils::{truncate_to_width, visible_width, wrap_text_with_ansi};
+pub use widgets::{
+    Box, CancellableLoader, Editor, EditorOptions, EditorTheme, Image, ImageOptions, ImageTheme,
+    Input, Loader, LoaderIndicatorOptions, Markdown, MarkdownOptions, MarkdownTheme, SelectItem,
+    SelectList, SelectListTheme, SettingItem, SettingsList, SettingsListTheme, Spacer, Text,
+    TruncatedText,
+};

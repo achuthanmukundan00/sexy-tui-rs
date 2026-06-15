@@ -1,0 +1,23 @@
+[package]
+name = "sexy-tui-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Rust port of pi-tui — minimal terminal UI framework with differential rendering and enhanced theming"
+license = "MIT"
+repository = "https://github.com/achuthanmukundan00/sexy-tui-rs"
+
+[dependencies]
+crossterm = "0.28"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+notify = "6"  # TODO: theme hot-reload via notify crate
+unicode-width = "0.2"
+unicode-segmentation = "1"
+# syntect = "5"  # TODO: markdown syntax highlighting
+
+# Future dependencies:
+# - notify: hot-reload theme.toml via file watcher
+# - syntect: syntax highlighting in markdown code blocks (replaces TS highlight.js shell-out)
+
+[dev-dependencies]
+# vt100 = "0.15"  # TODO: virtual terminal for integration tests
