@@ -46,7 +46,7 @@ pub fn find_word_backward(text: &str, cursor: usize, options: Option<&WordNaviga
     // Skip trailing whitespace
     while idx > 0 {
         let seg = &segments[idx - 1];
-        let is_atomic_seg = is_atomic.map_or(false, |f| f(seg));
+        let is_atomic_seg = is_atomic.is_some_and(|f| f(seg));
         if !is_atomic_seg && is_whitespace_char(seg) {
             new_cursor -= seg.len();
             idx -= 1;
@@ -61,7 +61,7 @@ pub fn find_word_backward(text: &str, cursor: usize, options: Option<&WordNaviga
 
     let last = &segments[idx - 1];
 
-    if is_atomic.map_or(false, |f| f(last)) {
+    if is_atomic.is_some_and(|f| f(last)) {
         // Skip one atomic segment
         new_cursor -= last.len();
     } else if is_word_like(last) {
@@ -83,7 +83,7 @@ pub fn find_word_backward(text: &str, cursor: usize, options: Option<&WordNaviga
         // Skip non-word non-whitespace run (punctuation)
         while idx > 0 {
             let seg = &segments[idx - 1];
-            let is_atomic_seg = is_atomic.map_or(false, |f| f(seg));
+            let is_atomic_seg = is_atomic.is_some_and(|f| f(seg));
             if !is_atomic_seg && !is_word_like(seg) && !is_whitespace_char(seg) {
                 new_cursor -= seg.len();
                 idx -= 1;
@@ -115,7 +115,7 @@ pub fn find_word_forward(text: &str, cursor: usize, options: Option<&WordNavigat
     // Skip leading whitespace
     while seg_idx < segments.len() {
         let seg = &segments[seg_idx];
-        let is_atomic_seg = is_atomic.map_or(false, |f| f(seg));
+        let is_atomic_seg = is_atomic.is_some_and(|f| f(seg));
         if !is_atomic_seg && is_whitespace_char(seg) {
             new_cursor += seg.len();
             seg_idx += 1;
@@ -130,7 +130,7 @@ pub fn find_word_forward(text: &str, cursor: usize, options: Option<&WordNavigat
 
     let current = &segments[seg_idx];
 
-    if is_atomic.map_or(false, |f| f(current)) {
+    if is_atomic.is_some_and(|f| f(current)) {
         // Skip one atomic segment
         new_cursor += current.len();
     } else if is_word_like(current) {
@@ -141,7 +141,7 @@ pub fn find_word_forward(text: &str, cursor: usize, options: Option<&WordNavigat
         // Skip non-word non-whitespace run
         while seg_idx < segments.len() {
             let seg = &segments[seg_idx];
-            let is_atomic_seg = is_atomic.map_or(false, |f| f(seg));
+            let is_atomic_seg = is_atomic.is_some_and(|f| f(seg));
             if !is_atomic_seg && !is_word_like(seg) && !is_whitespace_char(seg) {
                 new_cursor += seg.len();
                 seg_idx += 1;

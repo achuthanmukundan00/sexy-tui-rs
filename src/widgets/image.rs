@@ -25,10 +25,17 @@ impl Image {
 
 impl Component for Image {
     fn render(&self, _width: u16) -> Vec<String> {
-        let dims = crate::terminal_image::get_image_dimensions(&self.base64_data, &self.mime_type);
-        let fallback = crate::terminal_image::image_fallback(
-            &self.mime_type, dims, self.opts.filename.as_deref());
-        vec![fallback]
+        let render_opts = crate::terminal_image::ImageRenderOptions {
+            max_width_cells: self.opts.max_width_cells,
+            max_height_cells: self.opts.max_height_cells,
+            filename: self.opts.filename.clone(),
+        };
+        let output = crate::terminal_image::render_image(
+            &self.base64_data,
+            &self.mime_type,
+            &render_opts,
+        );
+        vec![output]
     }
 
     fn invalidate(&mut self) {}

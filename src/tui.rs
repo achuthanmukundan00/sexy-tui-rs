@@ -38,12 +38,7 @@ pub trait Focusable {
     fn is_focused(&self) -> bool;
 }
 
-/// Check if a component implements Focusable.
-pub fn is_focusable(_component: &dyn Component) -> bool {
-    // In stable Rust, we can't directly check for trait implementation on trait objects.
-    // We use a workaround: try to cast to Any and check.
-    false // Placeholder — requires type registry or downcast
-}
+
 
 // =============================================================================
 // Container
@@ -108,7 +103,7 @@ impl Component for Container {
 
     fn wants_key_release(&self) -> bool {
         if let Some(idx) = self.focused_child {
-            self.children.get(idx).map_or(false, |c| c.wants_key_release())
+            self.children.get(idx).is_some_and(|c| c.wants_key_release())
         } else {
             false
         }
@@ -363,15 +358,24 @@ impl<'a> TUI<'a> {
             new_lines.push(ensure_line_width(&line, width));
         }
 
-        // Render any visible overlays on top
+        // Composite any visible overlays on top of root content.
         for (handle, component) in &self.overlays {
             if handle.borrow().hidden {
                 continue;
             }
             let overlay_lines = component.render(width);
-            // Overlay is rendered on top — simple overlay (would need proper compositing)
-            // For now, replace root lines with overlay lines at the same position
-            new_lines = overlay_lines;
+            // Composite: overlay lines replace root lines at matching indices.
+            // Lines beyond the root frame extend it, giving a "floating above" effect.
+            let n_overlay = overlay_lines.len();
+            let n_root = new_lines.len();
+            for i in 0..n_overlay.max(n_root) {
+                if i < n_overlay && i < n_root {
+                    new_lines[i] = overlay_lines[i].clone();
+                } else if i < n_overlay {
+                    new_lines.push(overlay_lines[i].clone());
+                }
+                // else: root line exists beyond overlay — keep as-is
+            }
         }
 
         // Apply SGR reset and OSC 8 reset per line
@@ -447,8 +451,10 @@ fn ensure_line_width(line: &str, width: u16) -> String {
     if visible < width {
         format!("{}{}", line, " ".repeat((width - visible) as usize))
     } else if visible > width {
-        // Truncation should have happened in render(). Error if not.
-        line[..line.len().min(width as usize)].to_string()
+        // Truncate at character boundary to avoid panicking on multi-byte UTF-8.
+        let mut chars: Vec<char> = line.chars().collect();
+        chars.truncate(width as usize);
+        chars.into_iter().collect()
     } else {
         line.to_string()
     }

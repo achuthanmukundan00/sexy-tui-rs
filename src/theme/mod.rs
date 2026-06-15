@@ -13,6 +13,10 @@ use std::collections::HashMap;
 pub struct Theme {
     /// Token values (resolved through all 3 layers).
     values: HashMap<String, String>,
+    /// Agent runtime overrides (highest priority).
+    overrides: HashMap<String, String>,
+    /// Path to the TOML config file for reloading.
+    config_path: Option<String>,
     /// Current capability tier.
     tier: capability::CapabilityTier,
 }
@@ -21,6 +25,8 @@ impl Theme {
     pub fn new(tier: capability::CapabilityTier) -> Self {
         Theme {
             values: HashMap::new(),
+            overrides: HashMap::new(),
+            config_path: None,
             tier,
         }
     }
@@ -28,6 +34,7 @@ impl Theme {
     /// Load theme from built-in defaults + TOML config.
     pub fn load(config_path: Option<&str>, tier: capability::CapabilityTier) -> Self {
         let mut theme = Theme::new(tier);
+        theme.config_path = config_path.map(|s| s.to_string());
         tokens::apply_defaults(&mut theme.values);
         if let Some(path) = config_path {
             config::load_toml(path, &mut theme.values);
@@ -35,18 +42,23 @@ impl Theme {
         theme
     }
 
+    /// Get the effective value for a token, checking overrides first.
+    fn resolve_value(&self, token: &str) -> Option<String> {
+        self.overrides.get(token)
+            .or_else(|| self.values.get(token))
+            .cloned()
+    }
+
     /// Apply a foreground color token to text.
     pub fn fg(&self, token: &str, text: &str) -> String {
-        let color = self.values.get(token)
-            .cloned()
+        let color = self.resolve_value(token)
             .unwrap_or_else(|| token.to_string());
         palette::apply_fg(&color, text)
     }
 
     /// Apply a background color token to text.
     pub fn bg(&self, token: &str, text: &str) -> String {
-        let color = self.values.get(token)
-            .cloned()
+        let color = self.resolve_value(token)
             .unwrap_or_else(|| token.to_string());
         palette::apply_bg(&color, text)
     }
@@ -63,8 +75,7 @@ impl Theme {
 
     /// Resolve an icon token (with capability-aware fallback).
     pub fn icon(&self, token: &str) -> String {
-        self.values.get(token)
-            .cloned()
+        self.resolve_value(token)
             .unwrap_or_else(|| tokens::ascii_fallback(token).to_string())
     }
 
@@ -75,17 +86,17 @@ impl Theme {
 
     /// Override a token value at runtime (agent layer — highest priority).
     pub fn override_token(&mut self, key: &str, value: &str) {
-        self.values.insert(key.to_string(), value.to_string());
+        self.overrides.insert(key.to_string(), value.to_string());
     }
 
-    /// Clear a single agent override.
-    pub fn clear_override(&mut self, _key: &str) {
-        // In the full implementation, this would restore from lower layers
+    /// Clear a single agent override, restoring the lower-layer value.
+    pub fn clear_override(&mut self, key: &str) {
+        self.overrides.remove(key);
     }
 
-    /// Clear all agent overrides (reload from TOML).
+    /// Clear all agent overrides, restoring lower-layer values.
     pub fn clear_all_overrides(&mut self) {
-        // In the full implementation, reload from TOML + defaults
+        self.overrides.clear();
     }
 
     /// List all overrideable token keys.
@@ -95,7 +106,7 @@ impl Theme {
 
     /// Resolve a token value through all layers.
     pub fn resolve<T: std::str::FromStr>(&self, key: &str) -> Option<T> {
-        self.values.get(key).and_then(|v| v.parse().ok())
+        self.resolve_value(key).and_then(|v| v.parse().ok())
     }
 }
 

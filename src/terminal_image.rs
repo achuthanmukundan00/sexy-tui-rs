@@ -13,6 +13,7 @@ pub enum ImageProtocol {
 
 /// Detected terminal capabilities.
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct TerminalCapabilities {
     pub kitty_graphics: bool,
     pub iterm2_images: bool,
@@ -22,18 +23,6 @@ pub struct TerminalCapabilities {
     pub nerd_font: bool,
 }
 
-impl Default for TerminalCapabilities {
-    fn default() -> Self {
-        TerminalCapabilities {
-            kitty_graphics: false,
-            iterm2_images: false,
-            sync_output: false,
-            kitty_keyboard: false,
-            true_color: false,
-            nerd_font: false,
-        }
-    }
-}
 
 /// Terminal cell dimensions.
 #[derive(Debug, Clone, Copy)]
@@ -105,7 +94,7 @@ pub fn encode_iterm2(
     _cell_dims: CellDimensions,
 ) -> String {
     let width = opts.max_width_cells.unwrap_or(dims.width_px);
-    let height = calculate_image_rows(dims, opts, CellDimensions::default()) as u32;
+    let height = calculate_image_rows(dims, opts, CellDimensions::default());
     format!(
         "\x1b]1337;File=inline=1;width={}px;height={}px;preserveAspectRatio=1:{}\x07",
         width, height, base64_data
@@ -154,6 +143,12 @@ use std::sync::Mutex;
 static CAPABILITIES: Mutex<Option<TerminalCapabilities>> = Mutex::new(None);
 static CELL_DIMS: Mutex<Option<CellDimensions>> = Mutex::new(None);
 
+/// Recover from a poisoned mutex. If the lock is poisoned, return the inner
+/// value anyway (a panic in one holder shouldn't break the whole TUI).
+fn lock_or_recover<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// Detect terminal capabilities.
 pub fn detect_capabilities() -> TerminalCapabilities {
     let mut caps = TerminalCapabilities::default();
@@ -182,7 +177,7 @@ pub fn detect_capabilities() -> TerminalCapabilities {
 
 /// Get cached capabilities.
 pub fn get_capabilities() -> TerminalCapabilities {
-    let mut guard = CAPABILITIES.lock().unwrap();
+    let mut guard = lock_or_recover(&CAPABILITIES);
     if guard.is_none() {
         *guard = Some(detect_capabilities());
     }
@@ -191,44 +186,164 @@ pub fn get_capabilities() -> TerminalCapabilities {
 
 /// Reset the capabilities cache.
 pub fn reset_capabilities_cache() {
-    *CAPABILITIES.lock().unwrap() = None;
+    *lock_or_recover(&CAPABILITIES) = None;
 }
 
 /// Set capabilities explicitly.
 pub fn set_capabilities(caps: TerminalCapabilities) {
-    *CAPABILITIES.lock().unwrap() = Some(caps);
+    *lock_or_recover(&CAPABILITIES) = Some(caps);
 }
 
 /// Get cell dimensions (for image size calculations).
 pub fn get_cell_dimensions() -> CellDimensions {
-    CELL_DIMS.lock().unwrap().unwrap_or_default()
+    lock_or_recover(&CELL_DIMS).unwrap_or_default()
 }
 
 /// Set cell dimensions.
 pub fn set_cell_dimensions(dims: CellDimensions) {
-    *CELL_DIMS.lock().unwrap() = Some(dims);
+    *lock_or_recover(&CELL_DIMS) = Some(dims);
+}
+
+/// Decode a base64 string into raw bytes.
+fn decode_base64(data: &str) -> Option<Vec<u8>> {
+    use std::collections::HashMap;
+    let charset: HashMap<u8, u8> = (b'A'..=b'Z')
+        .chain(b'a'..=b'z')
+        .chain(b'0'..=b'9')
+        .enumerate()
+        .map(|(i, c)| (c, i as u8))
+        .chain([(b'+', 62), (b'/', 63)])
+        .collect();
+
+    let bytes: Vec<u8> = data
+        .bytes()
+        .filter(|b| *b != b'=' && !b.is_ascii_whitespace())
+        .filter_map(|b| charset.get(&b).copied())
+        .collect();
+
+    if bytes.is_empty() {
+        return None;
+    }
+
+    let mut out = Vec::with_capacity((bytes.len() * 3) / 4 + 1);
+    for chunk in bytes.chunks(4) {
+        let a = chunk.first().copied().unwrap_or(0) as u32;
+        let b = chunk.get(1).copied().unwrap_or(0) as u32;
+        let c = chunk.get(2).copied().unwrap_or(0) as u32;
+        let d = chunk.get(3).copied().unwrap_or(0) as u32;
+        let triple = (a << 18) | (b << 12) | (c << 6) | d;
+        out.push(((triple >> 16) & 0xFF) as u8);
+        if chunk.len() > 2 {
+            out.push(((triple >> 8) & 0xFF) as u8);
+        }
+        if chunk.len() > 3 {
+            out.push((triple & 0xFF) as u8);
+        }
+    }
+    Some(out)
+}
+
+/// Read a big-endian u32 at `offset` from `buf`.
+fn read_u32_be(buf: &[u8], offset: usize) -> Option<u32> {
+    let bytes = buf.get(offset..offset + 4)?;
+    Some(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
 }
 
 /// Get PNG image dimensions from base64 data.
-pub fn get_png_dimensions(_base64_data: &str) -> Option<ImageDimensions> {
-    // PNG header parsing: read IHDR chunk
-    // For now, return a default
-    None
+pub fn get_png_dimensions(base64_data: &str) -> Option<ImageDimensions> {
+    let data = decode_base64(base64_data)?;
+    // PNG signature: 8 bytes, then IHDR chunk at offset 8.
+    // IHDR: 4 bytes length (always 13), 4 bytes "IHDR",
+    //        4 bytes width, 4 bytes height.
+    if data.len() < 24 {
+        return None;
+    }
+    let width = read_u32_be(&data, 16)?;
+    let height = read_u32_be(&data, 20)?;
+    Some(ImageDimensions {
+        width_px: width,
+        height_px: height,
+    })
 }
 
 /// Get JPEG image dimensions from base64 data.
-pub fn get_jpeg_dimensions(_base64_data: &str) -> Option<ImageDimensions> {
+pub fn get_jpeg_dimensions(base64_data: &str) -> Option<ImageDimensions> {
+    let data = decode_base64(base64_data)?;
+    // Walk JPEG markers looking for SOF0 (0xC0) – SOF2 (0xC2).
+    let mut pos = 2; // skip SOI marker (0xFF 0xD8)
+    while pos + 4 <= data.len() {
+        if data[pos] != 0xFF {
+            break;
+        }
+        let marker = data[pos + 1];
+        pos += 2;
+        // SOF0 – SOF2 markers contain dimensions
+        if (0xC0..=0xC2).contains(&marker) && pos + 7 <= data.len() {
+            // Skip length (2 bytes), precision (1 byte)
+            let height = u16::from_be_bytes([data[pos + 3], data[pos + 4]]) as u32;
+            let width = u16::from_be_bytes([data[pos + 5], data[pos + 6]]) as u32;
+            return Some(ImageDimensions { width_px: width, height_px: height });
+        }
+        // Other markers: skip over them
+        if pos + 2 > data.len() {
+            break;
+        }
+        let seg_len = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
+        pos = pos.saturating_add(seg_len);
+    }
     None
 }
 
 /// Get GIF image dimensions from base64 data.
-pub fn get_gif_dimensions(_base64_data: &str) -> Option<ImageDimensions> {
-    None
+pub fn get_gif_dimensions(base64_data: &str) -> Option<ImageDimensions> {
+    let data = decode_base64(base64_data)?;
+    if data.len() < 10 {
+        return None;
+    }
+    // GIF header: 6 bytes ("GIF87a" or "GIF89a"), then little-endian width/height.
+    let width = u16::from_le_bytes([data[6], data[7]]) as u32;
+    let height = u16::from_le_bytes([data[8], data[9]]) as u32;
+    Some(ImageDimensions { width_px: width, height_px: height })
 }
 
 /// Get WebP image dimensions from base64 data.
-pub fn get_webp_dimensions(_base64_data: &str) -> Option<ImageDimensions> {
-    None
+pub fn get_webp_dimensions(base64_data: &str) -> Option<ImageDimensions> {
+    let data = decode_base64(base64_data)?;
+    // WebP: "RIFF" header at 0, "WEBP" at 8.
+    // VP8  (lossy):  dimensions in 14-bit LE + 14-bit LE from offset 26
+    // VP8L (lossless): dimensions in 14-bit LE from offset 25
+    // VP8X (extended):  dimensions are 24-bit LE +1 at offset 24
+    if data.len() < 30 {
+        return None;
+    }
+    // Check RIFF....WEBP header
+    if &data[0..4] != b"RIFF" || &data[8..12] != b"WEBP" {
+        return None;
+    }
+    let chunk = &data[12..16];
+    match chunk {
+        b"VP8 " if data.len() > 30 => {
+            // Lossy: bytes 26–27 encode width (14 bits), 28–29 encode height (14 bits)
+            let w = u16::from_le_bytes([data[26], data[27]]) as u32 & 0x3FFF;
+            let h = u16::from_le_bytes([data[28], data[29]]) as u32 & 0x3FFF;
+            Some(ImageDimensions { width_px: w, height_px: h })
+        }
+        b"VP8L" if data.len() > 25 => {
+            // Lossless: bytes 21–24 hold a 32-bit LE value
+            // bits 0–13 = width+1, bits 14–27 = height+1
+            let bits = u32::from_le_bytes([data[21], data[22], data[23], data[24]]);
+            let w = (bits & 0x3FFF) + 1;
+            let h = ((bits >> 14) & 0x3FFF) + 1;
+            Some(ImageDimensions { width_px: w, height_px: h })
+        }
+        b"VP8X" if data.len() > 30 => {
+            // Extended: bytes 24–26 = width+1 (LE 24-bit), 27–29 = height+1
+            let w = u32::from_le_bytes([data[24], data[25], data[26], 0]) + 1;
+            let h = u32::from_le_bytes([data[27], data[28], data[29], 0]) + 1;
+            Some(ImageDimensions { width_px: w, height_px: h })
+        }
+        _ => None,
+    }
 }
 
 /// Get image dimensions from base64 data (auto-detect format).

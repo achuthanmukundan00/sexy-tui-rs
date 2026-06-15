@@ -1,8 +1,10 @@
 /// Terminal abstraction layer. Port of src/terminal.ts (531 lines).
 
 use std::io::{self, Write};
-use std::sync::mpsc;
-use std::thread;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use crossterm::cursor;
 use crossterm::event::{self, Event, KeyEventKind};
@@ -14,6 +16,8 @@ use crate::terminal_image::get_capabilities;
 use crate::keys::set_kitty_protocol_active;
 
 const KITTY_KEYBOARD_PROTOCOL_QUERY: &str = "\x1b[>7u\x1b[?u\x1b[c";
+/// Poll interval for the input loop shutdown check.
+const POLL_TIMEOUT_MS: u64 = 50;
 
 /// Trait for terminal I/O implementations.
 pub trait Terminal {
@@ -61,6 +65,8 @@ pub struct ProcessTerminal {
     columns: u16,
     rows: u16,
     raw_mode: bool,
+    shutdown: Arc<AtomicBool>,
+    input_thread: Option<JoinHandle<()>>,
 }
 
 impl ProcessTerminal {
@@ -71,6 +77,8 @@ impl ProcessTerminal {
             columns: cols,
             rows,
             raw_mode: false,
+            shutdown: Arc::new(AtomicBool::new(false)),
+            input_thread: None,
         })
     }
 
@@ -82,6 +90,8 @@ impl ProcessTerminal {
             let mut stdout = io::stdout();
             let _ = execute!(stdout, crossterm::style::Print(KITTY_KEYBOARD_PROTOCOL_QUERY));
             let _ = stdout.flush();
+            // TODO: wait for and parse the response to confirm support.
+            // For now, assume the terminal supports it if caps say so.
             return true;
         }
         false
@@ -108,60 +118,97 @@ impl Terminal for ProcessTerminal {
         let kitty = self.negotiate_kitty_keyboard();
         set_kitty_protocol_active(kitty);
 
-        // Spawn input reader thread
+        // Spawn input reader thread with shutdown signalling
         let (tx, rx) = mpsc::channel();
+        let tx_for_thread = tx.clone(); // clone for the thread; keep tx for drop signalling
+        let shutdown_flag = Arc::clone(&self.shutdown);
 
-        thread::spawn(move || {
+        let handle = thread::spawn(move || {
             loop {
-                if let Ok(event) = event::read() {
-                    match event {
-                        Event::Key(key_event) => {
-                            // Only process press events, not repeats
-                            if key_event.kind == KeyEventKind::Repeat {
-                                continue;
+                // Check shutdown flag before blocking on event::read
+                if shutdown_flag.load(Ordering::Relaxed) {
+                    break;
+                }
+                // Poll with timeout so we can check the shutdown flag periodically
+                if let Ok(true) = event::poll(Duration::from_millis(POLL_TIMEOUT_MS)) {
+                    if let Ok(event) = event::read() {
+                        match event {
+                            Event::Key(key_event) => {
+                                if key_event.kind == KeyEventKind::Repeat {
+                                    continue;
+                                }
+                                let data = key_to_string(&key_event);
+                                if tx_for_thread.send(data).is_err() {
+                                    break;
+                                }
                             }
-                            let data = key_to_string(&key_event);
-                            if tx.send(data).is_err() {
-                                break;
-                            }
+                            Event::Resize(cols, rows)
+                                if tx_for_thread.send(format!("RESIZE:{}:{}", cols, rows)).is_err() => {
+                                    break;
+                                }
+                            _ => {}
                         }
-                        Event::Resize(cols, rows) => {
-                            if tx.send(format!("RESIZE:{}:{}", cols, rows)).is_err() {
-                                break;
-                            }
-                        }
-                        _ => {}
                     }
                 }
             }
         });
+        self.input_thread = Some(handle);
 
-        // Process input events
-        for data in rx {
-            if data.starts_with("RESIZE:") {
-                let parts: Vec<&str> = data.split(':').collect();
-                if parts.len() == 3 {
-                    if let (Ok(cols), Ok(rows)) = (parts[1].parse(), parts[2].parse()) {
-                        self.columns = cols;
-                        self.rows = rows;
-                        on_resize();
+        // Drop our sender clone so the receiver loop can detect
+        // when the input thread has stopped.
+        drop(tx);
+
+        // Process input events in a loop that checks the shutdown flag.
+        // The receiver will yield None when all senders are dropped
+        // (i.e. the input thread exited).
+        loop {
+            // Check shutdown flag so we don't block forever if the
+            // input thread is still running but we've been told to stop.
+            if self.shutdown.load(Ordering::Relaxed) {
+                break;
+            }
+            match rx.recv_timeout(Duration::from_millis(POLL_TIMEOUT_MS)) {
+                Ok(data) => {
+                    if data.starts_with("RESIZE:") {
+                        let parts: Vec<&str> = data.split(':').collect();
+                        if parts.len() == 3 {
+                            if let (Ok(cols), Ok(rows)) = (parts[1].parse(), parts[2].parse()) {
+                                self.columns = cols;
+                                self.rows = rows;
+                                on_resize();
+                            }
+                        }
+                    } else {
+                        if is_osc11_background_color_response(&data) {
+                            continue;
+                        }
+                        on_input(&data);
                     }
                 }
-            } else {
-                // Filter OSC 11 responses (handled internally)
-                if is_osc11_background_color_response(&data) {
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    // No event yet — loop back to check shutdown flag
                     continue;
                 }
-                on_input(&data);
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    // Input thread exited — clean shutdown
+                    break;
+                }
             }
         }
     }
 
     fn stop(&mut self) {
+        // Signal the input thread to exit
+        self.shutdown.store(true, Ordering::Release);
+        // Restore terminal state
         execute!(self.stdout, cursor::Show).ok();
         execute!(self.stdout, crossterm::style::Print("\x1b[?2004l")).ok();
         terminal::disable_raw_mode().ok();
         self.raw_mode = false;
+        // Wait for the input thread to finish
+        if let Some(handle) = self.input_thread.take() {
+            let _ = handle.join();
+        }
     }
 
     fn write(&mut self, data: &str) {
@@ -248,8 +295,8 @@ fn key_to_string(event: &event::KeyEvent) -> String {
         KeyCode::Insert => result.push_str("\x1b[2~"),
         KeyCode::PageUp => result.push_str("\x1b[5~"),
         KeyCode::PageDown => result.push_str("\x1b[6~"),
-        KeyCode::F(n) => {
-            if n <= 12 {
+        KeyCode::F(n)
+            if n <= 12 => {
                 result.push_str(&format!("\x1b[{}~", match n {
                     1 => "11", 2 => "12", 3 => "13", 4 => "14", 5 => "15",
                     6 => "17", 7 => "18", 8 => "19", 9 => "20", 10 => "21",
@@ -257,7 +304,6 @@ fn key_to_string(event: &event::KeyEvent) -> String {
                     _ => unreachable!(),
                 }));
             }
-        }
         _ => {}
     }
 

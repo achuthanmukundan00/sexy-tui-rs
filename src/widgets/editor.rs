@@ -1,4 +1,5 @@
 use crate::tui::Component;
+use crate::editor_component::EditorComponent;
 
 use crate::theme::Theme;
 
@@ -15,13 +16,11 @@ impl EditorTheme {
     }
 }
 
+#[derive(Default)]
 pub struct EditorOptions {
     pub padding_x: u16,
 }
 
-impl Default for EditorOptions {
-    fn default() -> Self { EditorOptions { padding_x: 0 } }
-}
 
 use crate::tui::Focusable;
 
@@ -124,4 +123,22 @@ impl Component for Editor {
 impl Focusable for Editor {
     fn set_focused(&mut self, focused: bool) { self.focused = focused; }
     fn is_focused(&self) -> bool { self.focused }
+}
+
+impl EditorComponent for Editor {
+    fn get_text(&self) -> String {
+        self.get_text()
+    }
+
+    fn set_text(&mut self, text: &str) {
+        self.set_text(text);
+    }
+
+    fn on_submit(&mut self, _text: &str) {
+        // Default: no-op. Consumers should override via composition.
+    }
+
+    fn on_change(&mut self, _text: &str) {
+        // Default: no-op. Consumers should override via composition.
+    }
 }

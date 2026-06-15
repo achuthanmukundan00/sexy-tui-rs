@@ -26,7 +26,6 @@ fn hex_to_rgb(hex: &str) -> (u8, u8, u8) {
 }
 
 /// Generate a palette of ANSI colors from a base hex color.
-#[allow(dead_code)]
 pub fn generate_palette(base_hex: &str) -> Vec<String> {
     let (r, g, b) = hex_to_rgb(base_hex);
     let mut palette = Vec::with_capacity(8);

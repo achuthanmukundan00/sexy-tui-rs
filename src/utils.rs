@@ -486,7 +486,7 @@ fn could_be_emoji(grapheme: &str) -> bool {
 pub fn truncate_to_width(str: &str, max_width: usize, ellipsis: Option<&str>) -> String {
     let ellipsis = ellipsis.unwrap_or("…");
     let ellipsis_width = visible_width(ellipsis);
-    let available = if max_width > ellipsis_width { max_width - ellipsis_width } else { 0 };
+    let available = max_width.saturating_sub(ellipsis_width);
 
     if visible_width(str) <= max_width {
         return str.to_string();
@@ -766,7 +766,7 @@ pub const PUNCTUATION_CHARS: &str = "(){}[]<>.,;:'\"!?+-=*/\\|&%^$#@~`";
 
 /// Check if the first character of a string is punctuation.
 pub fn is_punctuation_char(s: &str) -> bool {
-    s.chars().next().map_or(false, |c| PUNCTUATION_CHARS.contains(c))
+    s.chars().next().is_some_and(|c| PUNCTUATION_CHARS.contains(c))
 }
 
 /// Check if a string is only whitespace.

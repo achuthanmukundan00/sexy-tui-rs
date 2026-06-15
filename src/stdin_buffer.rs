@@ -27,8 +27,7 @@ pub struct StdinBuffer {
     in_paste: bool,
     paste_line_count: usize,
     paste_counter: usize,
-    #[allow(dead_code)]
-    options: StdinBufferOptions,
+    max_buffer_size: usize,
 }
 
 impl StdinBuffer {
@@ -38,7 +37,7 @@ impl StdinBuffer {
             in_paste: false,
             paste_line_count: 0,
             paste_counter: 0,
-            options,
+            max_buffer_size: options.max_buffer_size,
         }
     }
 
@@ -48,6 +47,11 @@ impl StdinBuffer {
 
         for ch in data.chars() {
             self.buffer.push(ch);
+
+            // Flush if buffer exceeds max size (prevents unbounded growth)
+            if self.buffer.len() >= self.max_buffer_size {
+                results.push(std::mem::take(&mut self.buffer));
+            }
 
             // Check for bracketed paste start
             if self.buffer.ends_with(BRACKETED_PASTE_START) {

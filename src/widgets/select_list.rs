@@ -26,13 +26,14 @@ pub struct SelectList {
     filter: String,
     max_visible: usize,
     scroll_offset: usize,
+    theme: SelectListTheme,
 }
 
 impl SelectList {
-    pub fn new(items: Vec<SelectItem>, max_visible: usize, _theme: SelectListTheme) -> Self {
+    pub fn new(items: Vec<SelectItem>, max_visible: usize, theme: SelectListTheme) -> Self {
         let filtered: Vec<usize> = (0..items.len()).collect();
         SelectList { items, filtered, selected: 0, filter: String::new(),
-            max_visible, scroll_offset: 0 }
+            max_visible, scroll_offset: 0, theme }
     }
 
     pub fn set_filter(&mut self, filter: &str) {
@@ -56,19 +57,34 @@ impl Component for SelectList {
         let end = (self.scroll_offset + self.max_visible).min(self.filtered.len());
         let visible = &self.filtered[self.scroll_offset..end];
 
+        if visible.is_empty() {
+            return vec![(self.theme.no_match)("No matches")];
+        }
+
         let mut lines: Vec<String> = visible.iter().enumerate().map(|(i, &idx)| {
             let item = &self.items[idx];
-            let prefix = if self.scroll_offset + i == self.selected { "❯ " } else { "  " };
-            let line = if let Some(ref desc) = item.description {
-                format!("{}{} — {}", prefix, item.label, desc)
+            let is_selected = self.scroll_offset + i == self.selected;
+            let prefix = if is_selected {
+                (self.theme.selected_prefix)("❯ ")
             } else {
-                format!("{}{}", prefix, item.label)
+                "  ".to_string()
+            };
+            let label = if is_selected {
+                (self.theme.selected_text)(&item.label)
+            } else {
+                item.label.clone()
+            };
+            let line = if let Some(ref desc) = item.description {
+                format!("{} — {}", label, (self.theme.description)(desc))
+            } else {
+                format!("{}{}", prefix, label)
             };
             crate::utils::truncate_to_width(&line, width as usize, None)
         }).collect();
 
         if self.filtered.len() > self.max_visible {
-            lines.push(format!("[{}/{}+]", self.selected + 1, self.filtered.len()));
+            let info = format!("[{}/{}]", self.selected + 1, self.filtered.len());
+            lines.push((self.theme.scroll_info)(&info));
         }
         lines
     }

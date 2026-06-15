@@ -6,7 +6,7 @@ use crate::tui::Component;
 /// Extends Component with editor-specific behavior.
 pub trait EditorComponent: Component {
     /// Get the current text content.
-    fn get_text(&self) -> &str;
+    fn get_text(&self) -> String;
 
     /// Set the text content.
     fn set_text(&mut self, text: &str);

@@ -61,7 +61,7 @@ impl CombinedAutocompleteProvider {
         } else if query.starts_with('/') {
             query.to_string()
         } else if query.starts_with("~/") {
-            if let Some(home) = std::env::var("HOME").ok() {
+            if let Ok(home) = std::env::var("HOME") {
                 format!("{}/{}", home, &query[2..])
             } else {
                 query.to_string()

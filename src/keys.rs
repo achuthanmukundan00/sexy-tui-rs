@@ -113,14 +113,16 @@ impl Key {
 // Modifier Constants
 // =============================================================================
 
-#[allow(dead_code)]
-mod modifiers {
+pub(crate) mod modifiers {
     pub const SHIFT: u8 = 1;
     pub const ALT: u8 = 2;
     pub const CTRL: u8 = 4;
     pub const SUPER: u8 = 8;
+    #[allow(dead_code)]
     pub const CAPS_LOCK: u8 = 16;
+    #[allow(dead_code)]
     pub const NUM_LOCK: u8 = 32;
+    #[allow(dead_code)]
     pub const LOCK_MASK: u8 = CAPS_LOCK | NUM_LOCK;
 }
 
@@ -128,8 +130,7 @@ mod modifiers {
 // Key Codepoint Constants
 // =============================================================================
 
-#[allow(dead_code)]
-mod codepoints {
+pub(crate) mod codepoints {
     pub const ESCAPE: u32 = 27;
     pub const ENTER: u32 = 13;
     pub const TAB: u32 = 9;
@@ -173,20 +174,35 @@ pub fn decode_kitty_printable(data: &str) -> Option<char> {
     char::from_u32(codepoint)
 }
 
+/// Kitty protocol: modifier bit 3 (value 8) indicates a key release event.
+const KITTY_RELEASE_FLAG: u8 = 8;
+
 /// Check if input data is a key release event.
 pub fn is_key_release(data: &str) -> bool {
-    if data.len() < 3 {
-        return false;
+    // Release format: ESC [ evt:3 ; <modifier> u  (when using event-type subparameter)
+    // or ESC [ <codepoint> ; <modifier> u where modifier has bit 3 set.
+    if let Some((_, modifier)) = parse_kitty_sequence(data) {
+        return modifier & KITTY_RELEASE_FLAG != 0;
     }
-    // Kitty protocol: ESC [ <codepoint> ; <modifier> u where modifier has release bit
-    // Release events end with ":3u" or have modifier including release flag
-    data.contains(":3") || (data.starts_with("\x1b[") && data.contains(';') && data.ends_with('u'))
+    // Legacy terminals: ESC [ evt:3 ~
+    if data.starts_with("\x1b[") && data.contains(":3") {
+        return true;
+    }
+    false
 }
 
 /// Check if input data is a key repeat event.
-pub fn is_key_repeat(_data: &str) -> bool {
-    // In Kitty protocol, repeat events are handled by the protocol itself
-    // For now, return false — actual repeat detection is terminal-specific
+pub fn is_key_repeat(data: &str) -> bool {
+    // In Kitty protocol, repeat events have event-type 2: ESC [ evt:2 ; ... u
+    if data.starts_with("\x1b[") && data.contains(":2") {
+        return true;
+    }
+    if let Some((_, modifier)) = parse_kitty_sequence(data) {
+        // Kitty encodes repeat in the event-type subparameter, not the modifier.
+        // The modifier byte alone can't distinguish repeat from press.
+        // For now, return false for pure CSI u sequences.
+        let _ = modifier;
+    }
     false
 }
 

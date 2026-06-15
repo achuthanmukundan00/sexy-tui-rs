@@ -51,13 +51,17 @@ pub use terminal_image::{
     ImageDimensions, ImageProtocol, ImageRenderOptions, TerminalCapabilities,
 };
 pub use tui::{
-    is_focusable, Component, Container, CURSOR_MARKER, Focusable, OverlayAnchor, OverlayHandle,
+    Component, Container, CURSOR_MARKER, Focusable, OverlayAnchor, OverlayHandle,
     OverlayMargin, OverlayOptions, OverlayUnfocusOptions, TUI,
 };
 pub use utils::{truncate_to_width, visible_width, wrap_text_with_ansi};
 pub use widgets::{
-    Box, CancellableLoader, Editor, EditorOptions, EditorTheme, Image, ImageOptions, ImageTheme,
-    Input, Loader, LoaderIndicatorOptions, Markdown, MarkdownOptions, MarkdownTheme, SelectItem,
-    SelectList, SelectListTheme, SettingItem, SettingsList, SettingsListTheme, Spacer, Text,
+    CancellableLoader, Editor, EditorOptions, EditorTheme, Image, ImageOptions, ImageTheme,
+    Input, Loader, LoaderIndicatorOptions, Markdown, MarkdownOptions, MarkdownTheme, Panel,
+    SelectItem, SelectList, SelectListTheme, SettingItem, SettingsList, SettingsListTheme, Spacer, Text,
     TruncatedText,
 };
+
+/// Deprecated alias — use `Panel` instead.
+#[deprecated(since = "0.1.1", note = "Renamed to Panel to avoid shadowing std::boxed::Box")]
+pub type Box = Panel;

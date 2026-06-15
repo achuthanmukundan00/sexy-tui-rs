@@ -1,29 +1,28 @@
 use crate::tui::Component;
-use std::boxed::Box as StdBox;
 
-/// Box widget — container with padding and background color.
-pub struct Box {
-    children: Vec<StdBox<dyn Component>>,
+/// Panel widget — container with padding and background color.
+pub struct Panel {
+    children: Vec<Box<dyn Component>>,
     padding_x: u16,
     padding_y: u16,
-    bg_fn: Option<StdBox<dyn Fn(&str) -> String>>,
+    bg_fn: Option<Box<dyn Fn(&str) -> String>>,
 }
 
-impl Box {
-    pub fn new(padding_x: u16, padding_y: u16, bg_fn: Option<StdBox<dyn Fn(&str) -> String>>) -> Self {
-        Box { children: Vec::new(), padding_x, padding_y, bg_fn }
+impl Panel {
+    pub fn new(padding_x: u16, padding_y: u16, bg_fn: Option<Box<dyn Fn(&str) -> String>>) -> Self {
+        Panel { children: Vec::new(), padding_x, padding_y, bg_fn }
     }
 
-    pub fn add_child(&mut self, child: StdBox<dyn Component>) {
+    pub fn add_child(&mut self, child: Box<dyn Component>) {
         self.children.push(child);
     }
 
-    pub fn set_bg_fn(&mut self, bg_fn: StdBox<dyn Fn(&str) -> String>) {
+    pub fn set_bg_fn(&mut self, bg_fn: Box<dyn Fn(&str) -> String>) {
         self.bg_fn = Some(bg_fn);
     }
 }
 
-impl Component for Box {
+impl Component for Panel {
     fn render(&self, width: u16) -> Vec<String> {
         let inner_width = width.saturating_sub(self.padding_x * 2);
         let spacer = " ".repeat(self.padding_x as usize);

@@ -111,7 +111,7 @@ impl KeybindingsManager {
                         if k2.contains(key) {
                             conflicts.push(KeybindingConflict {
                                 action: a1.clone(),
-                                key: *key,
+                                key: key,
                                 conflicts_with: a2.clone(),
                             });
                         }
@@ -127,12 +127,17 @@ use std::sync::Mutex;
 
 static KEYBINDINGS_INSTANCE: Mutex<Option<KeybindingsManager>> = Mutex::new(None);
 
+/// Recover from a poisoned mutex.
+fn lock_or_recover<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// Set the global keybindings manager.
 pub fn set_keybindings(manager: KeybindingsManager) {
-    *KEYBINDINGS_INSTANCE.lock().unwrap() = Some(manager);
+    *lock_or_recover(&KEYBINDINGS_INSTANCE) = Some(manager);
 }
 
 /// Get the global keybindings manager.
 pub fn get_keybindings() -> Option<KeybindingsManager> {
-    KEYBINDINGS_INSTANCE.lock().unwrap().clone()
+    lock_or_recover(&KEYBINDINGS_INSTANCE).clone()
 }
