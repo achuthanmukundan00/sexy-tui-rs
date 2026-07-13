@@ -1,6 +1,5 @@
 /// Core TUI implementation with differential rendering.
 /// Port of @earendil-works/pi-tui src/tui.ts (1641 lines).
-
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -37,8 +36,6 @@ pub trait Focusable {
     fn set_focused(&mut self, focused: bool);
     fn is_focused(&self) -> bool;
 }
-
-
 
 // =============================================================================
 // Container
@@ -103,7 +100,9 @@ impl Component for Container {
 
     fn wants_key_release(&self) -> bool {
         if let Some(idx) = self.focused_child {
-            self.children.get(idx).is_some_and(|c| c.wants_key_release())
+            self.children
+                .get(idx)
+                .is_some_and(|c| c.wants_key_release())
         } else {
             false
         }
@@ -153,7 +152,12 @@ pub struct OverlayMargin {
 
 impl OverlayMargin {
     pub fn all(value: u16) -> Self {
-        OverlayMargin { top: value, right: value, bottom: value, left: value }
+        OverlayMargin {
+            top: value,
+            right: value,
+            bottom: value,
+            left: value,
+        }
     }
 }
 
@@ -238,6 +242,9 @@ pub struct TUI<'a> {
     overlays: Vec<(Rc<RefCell<OverlayHandle>>, Box<dyn Component>)>,
     next_overlay_id: usize,
     previous_frame: Vec<String>,
+    /// Terminal dimensions used for `previous_frame`. A resize invalidates all
+    /// cursor-relative differential-rendering assumptions.
+    previous_size: Option<(u16, u16)>,
     first_render: bool,
     running: bool,
     input_listeners: Vec<Box<dyn FnMut(&str) -> Option<String> + 'a>>,
@@ -251,6 +258,7 @@ impl<'a> TUI<'a> {
             overlays: Vec::new(),
             next_overlay_id: 0,
             previous_frame: Vec::new(),
+            previous_size: None,
             first_render: true,
             running: false,
             input_listeners: Vec::new(),
@@ -273,10 +281,18 @@ impl<'a> TUI<'a> {
     }
 
     /// Show an overlay on top of the current content.
-    pub fn show_overlay(&mut self, component: Box<dyn Component>, options: OverlayOptions) -> Rc<RefCell<OverlayHandle>> {
+    pub fn show_overlay(
+        &mut self,
+        component: Box<dyn Component>,
+        options: OverlayOptions,
+    ) -> Rc<RefCell<OverlayHandle>> {
         let id = self.next_overlay_id;
         self.next_overlay_id += 1;
-        let handle = Rc::new(RefCell::new(OverlayHandle { id, hidden: false, focused: !options.non_capturing }));
+        let handle = Rc::new(RefCell::new(OverlayHandle {
+            id,
+            hidden: false,
+            focused: !options.non_capturing,
+        }));
         self.overlays.push((handle.clone(), component));
         handle
     }
@@ -333,7 +349,10 @@ impl<'a> TUI<'a> {
         }
 
         // Route to focused overlay or root
-        let has_capturing_overlay = self.overlays.iter().any(|(h, _)| h.borrow().focused && !h.borrow().hidden);
+        let has_capturing_overlay = self
+            .overlays
+            .iter()
+            .any(|(h, _)| h.borrow().focused && !h.borrow().hidden);
 
         if has_capturing_overlay {
             if let Some((_, component)) = self.overlays.last_mut() {
@@ -349,7 +368,10 @@ impl<'a> TUI<'a> {
     /// Render the current frame using the differential rendering algorithm.
     fn render_frame(&mut self) {
         let width = self.terminal.columns();
-        let _height = self.terminal.rows();
+        let height = self.terminal.rows();
+        let size_changed = self
+            .previous_size
+            .is_some_and(|size| size != (width, height));
 
         let mut new_lines: Vec<String> = Vec::new();
 
@@ -379,33 +401,36 @@ impl<'a> TUI<'a> {
         }
 
         // Apply SGR reset and OSC 8 reset per line
-        new_lines = new_lines.into_iter()
+        new_lines = new_lines
+            .into_iter()
             .map(|line| format!("{}\x1b[0m\x1b]8;;\x1b\\", line))
             .collect();
 
-        // Differential rendering
+        // A terminal reflows the old frame before delivering its resize event.
+        // Cursor-relative differential updates are therefore invalid even when
+        // the logical line count did not change; clear and redraw from home.
         if self.first_render {
-            // Strategy 1: First render — output all lines
             self.write_all_lines(&new_lines);
             self.first_render = false;
         } else if self.previous_frame.is_empty() {
-            // Fallback to full render
             self.write_all_lines(&new_lines);
+        } else if size_changed {
+            self.redraw_all_from_home(&new_lines);
         } else {
             // Strategy 3: Incremental update
-            let first_changed = self.previous_frame.iter()
+            let first_changed = self
+                .previous_frame
+                .iter()
                 .zip(&new_lines)
                 .position(|(prev, new)| prev != new)
                 .unwrap_or(self.previous_frame.len().min(new_lines.len()));
 
             if first_changed == 0 && self.previous_frame.len() != new_lines.len() {
-                // Lines changed count — full re-render
-                self.terminal.clear_screen();
-                self.write_all_lines(&new_lines);
+                self.redraw_all_from_home(&new_lines);
             } else if first_changed < self.previous_frame.len() {
                 // Move cursor to first changed line, clear to end, write tail
                 self.terminal.write("\x1b[?2026h"); // Begin sync output
-                // Move cursor to correct row (simplified — assumes cursor at bottom)
+                                                    // Move cursor to correct row (simplified — assumes cursor at bottom)
                 let diff = self.previous_frame.len() - first_changed;
                 if diff > 0 {
                     let move_up = format!("\x1b[{}A", diff);
@@ -425,11 +450,21 @@ impl<'a> TUI<'a> {
         }
 
         self.previous_frame = new_lines;
+        self.previous_size = Some((width, height));
+    }
+
+    fn redraw_all_from_home(&mut self, lines: &[String]) {
+        // `Clear(All)` does not universally home the cursor. Do both before
+        // repainting so resize and line-count redraws cannot append a frame.
+        self.terminal.write("\x1b[H");
+        self.terminal.clear_screen();
+        self.terminal.write("\x1b[H");
+        self.write_all_lines(lines);
     }
 
     fn write_all_lines(&mut self, lines: &[String]) {
         self.terminal.write("\x1b[?2026h"); // Begin sync output
-        // Delete any existing Kitty images on full render
+                                            // Delete any existing Kitty images on full render
         if !self.first_render {
             // Check if any previous lines had images
             let has_images = self.previous_frame.iter().any(|l| is_image_line(l));
@@ -457,5 +492,76 @@ fn ensure_line_width(line: &str, width: u16) -> String {
         chars.into_iter().collect()
     } else {
         line.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    struct RecordingTerminal {
+        size: Rc<Cell<(u16, u16)>>,
+        clears: Rc<Cell<usize>>,
+        writes: Rc<RefCell<Vec<String>>>,
+    }
+
+    impl Terminal for RecordingTerminal {
+        fn start(&mut self, _on_input: Box<dyn FnMut(&str)>, _on_resize: Box<dyn FnMut()>) {}
+        fn stop(&mut self) {}
+        fn write(&mut self, data: &str) {
+            self.writes.borrow_mut().push(data.to_owned());
+        }
+        fn columns(&self) -> u16 {
+            self.size.get().0
+        }
+        fn rows(&self) -> u16 {
+            self.size.get().1
+        }
+        fn move_by(&mut self, _lines: i16) {}
+        fn hide_cursor(&mut self) {}
+        fn show_cursor(&mut self) {}
+        fn clear_line(&mut self) {}
+        fn clear_from_cursor(&mut self) {}
+        fn clear_screen(&mut self) {
+            self.clears.set(self.clears.get() + 1);
+        }
+    }
+
+    struct OneLine;
+
+    impl Component for OneLine {
+        fn render(&self, _width: u16) -> Vec<String> {
+            vec!["line".to_owned()]
+        }
+
+        fn invalidate(&mut self) {}
+    }
+
+    #[test]
+    fn resize_forces_a_home_and_full_redraw() {
+        let size = Rc::new(Cell::new((20, 8)));
+        let clears = Rc::new(Cell::new(0));
+        let writes = Rc::new(RefCell::new(Vec::new()));
+        let terminal = RecordingTerminal {
+            size: size.clone(),
+            clears: clears.clone(),
+            writes: writes.clone(),
+        };
+        let mut tui = TUI::new(Box::new(terminal));
+        tui.add_child(Box::new(OneLine));
+        tui.start();
+        size.set((80, 24));
+        tui.request_render();
+
+        assert_eq!(clears.get(), 1);
+        assert_eq!(
+            writes
+                .borrow()
+                .iter()
+                .filter(|write| write.as_str() == "\x1b[H")
+                .count(),
+            2
+        );
     }
 }
