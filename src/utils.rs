@@ -240,18 +240,24 @@ fn strip_ansi(str: &str) -> String {
     }
 
     let mut result = String::with_capacity(str.len());
-    let bytes = str.as_bytes();
     let mut i = 0;
 
-    while i < bytes.len() {
-        if bytes[i] == 0x1b {
+    while i < str.len() {
+        if str.as_bytes()[i] == 0x1b {
             if let Some((_, len)) = extract_ansi_code(str, i) {
                 i += len;
                 continue;
             }
         }
-        result.push(bytes[i] as char);
-        i += 1;
+        // Advance by a complete UTF-8 scalar instead of copying one byte as a
+        // Latin-1 character. Width calculations run through this path whenever
+        // a styled line also contains box-drawing or other Unicode text.
+        let character = str[i..]
+            .chars()
+            .next()
+            .expect("index is within the source string");
+        result.push(character);
+        i += character.len_utf8();
     }
 
     result
@@ -792,6 +798,11 @@ mod tests {
     #[test]
     fn test_visible_width_emoji() {
         assert_eq!(visible_width("🎉"), 2);
+    }
+
+    #[test]
+    fn styled_unicode_width_is_not_counted_as_utf8_bytes() {
+        assert_eq!(visible_width("\x1b[31m┏━━┓\x1b[0m"), 4);
     }
 
     #[test]
